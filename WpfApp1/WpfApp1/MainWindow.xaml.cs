@@ -4,21 +4,31 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 
 namespace WpfApp1
 {
     public partial class MainWindow : Window
     {
-        private bool[,]? field;
+        private bool[,]? field;               //true черная клетка
         private int width, height;
-        private int antX, antY, direction;
+        private int antX, antY, direction;    //0вверх, 1вправо, 2вниз, 3влево
 
         private readonly List<string> whiteRules = new();
         private readonly List<string> blackRules = new();
 
+        private DispatcherTimer? timer;
+        private bool isRunning;
+
         private const double CellSize = 20;
         private readonly List<Rectangle> cells = new();
         private Polygon? antArrow;
+
+        //для анимации
+        private DispatcherTimer? animTimer;
+        private double animX, animY, targetX, targetY;
+        private double animProgress;
+        private bool isAnimating;
 
         private static readonly string[] Actions =
         {
@@ -32,6 +42,7 @@ namespace WpfApp1
         {
             InitializeComponent();
 
+            //заполняем выпадающие списки
             foreach (var a in Actions)
             {
                 CmbWhiteAction.Items.Add(a);
@@ -40,7 +51,8 @@ namespace WpfApp1
             CmbWhiteAction.SelectedIndex = 0;
             CmbBlackAction.SelectedIndex = 0;
 
-            whiteRules.AddRange(new[] { "Повернуть направо", "Перекрасить клетку", "Идти прямо" });
+            //правила по умолчанию
+            whiteRules.AddRange(new[] { "Повернуть направо", "Перекрасить клетку" });
             blackRules.AddRange(new[] { "Повернуть налево", "Перекрасить клетку", "Идти прямо" });
             UpdateRuleLists();
         }
@@ -84,8 +96,11 @@ namespace WpfApp1
             if (i >= 0) { blackRules.RemoveAt(i); UpdateRuleLists(); }
         }
 
+        //генерация поля
         private void BtnGenerate_Click(object sender, RoutedEventArgs e)
         {
+            Stop();
+
             if (!int.TryParse(TxtWidth.Text, out width) || width < 5 || width > 50 ||
                 !int.TryParse(TxtHeight.Text, out height) || height < 5 || height > 50)
             {
@@ -96,10 +111,12 @@ namespace WpfApp1
             var rnd = new Random();
             field = new bool[width, height];
 
+            //случайные клетки
             for (int x = 0; x < width; x++)
                 for (int y = 0; y < height; y++)
                     field[x, y] = rnd.NextDouble() < 0.3;
 
+            //позиция муравья
             if (int.TryParse(TxtStartX.Text, out int sx) && int.TryParse(TxtStartY.Text, out int sy) &&
                 sx >= 0 && sx < width && sy >= 0 && sy < height)
             {
@@ -129,6 +146,7 @@ namespace WpfApp1
             FieldCanvas.Width = width * CellSize;
             FieldCanvas.Height = height * CellSize;
 
+            // Клетки
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
@@ -151,6 +169,7 @@ namespace WpfApp1
             DrawAnt(antX * CellSize, antY * CellSize);
         }
 
+        //рисует красную стрелку
         private void DrawAnt(double left, double top)
         {
             if (antArrow != null)
@@ -162,10 +181,10 @@ namespace WpfApp1
 
             Point[] pts = direction switch
             {
-                0 => new[] { new Point(cx, cy - s), new Point(cx - s * 0.7, cy + s * 0.6), new Point(cx + s * 0.7, cy + s * 0.6) },
-                1 => new[] { new Point(cx + s, cy), new Point(cx - s * 0.6, cy - s * 0.7), new Point(cx - s * 0.6, cy + s * 0.7) },
-                2 => new[] { new Point(cx, cy + s), new Point(cx - s * 0.7, cy - s * 0.6), new Point(cx + s * 0.7, cy - s * 0.6) },
-                _ => new[] { new Point(cx - s, cy), new Point(cx + s * 0.6, cy - s * 0.7), new Point(cx + s * 0.6, cy + s * 0.7) }
+                0 => new[] { new Point(cx, cy - s), new Point(cx - s * 0.7, cy + s * 0.6), new Point(cx + s * 0.7, cy + s * 0.6) }, // вверх
+                1 => new[] { new Point(cx + s, cy), new Point(cx - s * 0.6, cy - s * 0.7), new Point(cx - s * 0.6, cy + s * 0.7) }, // вправо
+                2 => new[] { new Point(cx, cy + s), new Point(cx - s * 0.7, cy - s * 0.6), new Point(cx + s * 0.7, cy - s * 0.6) }, // вниз
+                _ => new[] { new Point(cx - s, cy), new Point(cx + s * 0.6, cy - s * 0.7), new Point(cx + s * 0.6, cy + s * 0.7) }  // влево
             };
 
             antArrow = new Polygon
@@ -178,7 +197,135 @@ namespace WpfApp1
             FieldCanvas.Children.Add(antArrow);
         }
 
-        private void BtnStart_Click(object sender, RoutedEventArgs e) { }
-        private void BtnPause_Click(object sender, RoutedEventArgs e) { }
+        private void UpdateCell(int x, int y)
+        {
+            if (field == null) return;
+            int index = y * width + x;
+            if (index >= 0 && index < cells.Count)
+                cells[index].Fill = field[x, y] ? Brushes.Black : Brushes.White;
+        }
+
+        private void BtnStart_Click(object sender, RoutedEventArgs e)
+        {
+            if (field == null)
+            {
+                MessageBox.Show("Сначала нажмите «Сгенерировать»");
+                return;
+            }
+
+            isRunning = true;
+            BtnStart.IsEnabled = false;
+            BtnPause.IsEnabled = true;
+            BtnGenerate.IsEnabled = false;
+
+            timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+            timer.Tick += OnStep;
+            timer.Start();
+        }
+
+        private void BtnPause_Click(object sender, RoutedEventArgs e) => Stop();
+
+        private void Stop()
+        {
+            isRunning = false;
+            timer?.Stop();
+            timer = null;
+            animTimer?.Stop();
+            animTimer = null;
+            isAnimating = false;
+
+            BtnStart.IsEnabled = true;
+            BtnPause.IsEnabled = false;
+            BtnGenerate.IsEnabled = true;
+        }
+
+        //один шаг
+        private void OnStep(object? sender, EventArgs e)
+        {
+            if (isAnimating || field == null) return;
+
+            //правила в зависимости от цвета
+            var rules = field[antX, antY] ? blackRules : whiteRules;
+
+            bool needMove = false;
+            int turn = 0;
+
+            foreach (var rule in rules)
+            {
+                if (rule == "Повернуть направо") turn = (turn + 1) % 4;
+                else if (rule == "Повернуть налево") turn = (turn + 3) % 4;
+                else if (rule == "Перекрасить клетку")
+                {
+                    field[antX, antY] = !field[antX, antY];
+                    UpdateCell(antX, antY);
+                }
+                else if (rule == "Идти прямо") needMove = true;
+            }
+
+            //поворот
+            direction = (direction + turn) % 4;
+            DrawAnt(antX * CellSize, antY * CellSize);
+
+            if (!needMove) return;
+
+            //новая позиция
+            int nx = antX, ny = antY;
+            if (direction == 0) ny--;
+            else if (direction == 1) nx++;
+            else if (direction == 2) ny++;
+            else nx--;
+
+            //через край с другой стороны
+            if (nx < 0) nx = width - 1;
+            if (nx >= width) nx = 0;
+            if (ny < 0) ny = height - 1;
+            if (ny >= height) ny = 0;
+
+            //если перешли через край сразу телепорт иначе анимация
+            if (Math.Abs(nx - antX) > 1 || Math.Abs(ny - antY) > 1)
+            {
+                antX = nx;
+                antY = ny;
+                DrawAnt(antX * CellSize, antY * CellSize);
+            }
+            else
+            {
+                StartAnimation(antX, antY, nx, ny);
+            }
+        }
+
+        //анимация
+        private void StartAnimation(int fromX, int fromY, int toX, int toY)
+        {
+            isAnimating = true;
+            animX = fromX * CellSize;
+            animY = fromY * CellSize;
+            targetX = toX * CellSize;
+            targetY = toY * CellSize;
+            animProgress = 0;
+
+            antX = toX;
+            antY = toY;
+
+            animTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+            animTimer.Tick += OnAnim;
+            animTimer.Start();
+        }
+
+        private void OnAnim(object? sender, EventArgs e)
+        {
+            animProgress += 0.15;
+            if (animProgress >= 1)
+            {
+                animTimer?.Stop();
+                isAnimating = false;
+                DrawAnt(antX * CellSize, antY * CellSize);
+                return;
+            }
+
+            double x = animX + (targetX - animX) * animProgress;
+            double y = animY + (targetY - animY) * animProgress;
+            DrawAnt(x, y);
+        }
     }
 }
