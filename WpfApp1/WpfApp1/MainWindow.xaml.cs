@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -20,7 +21,7 @@ namespace WpfApp1
         private DispatcherTimer? timer;
         private bool isRunning;
 
-        private const double CellSize = 20;
+        private double cellSize = 23;
         private readonly List<Rectangle> cells = new();
         private Polygon? antArrow;
 
@@ -130,6 +131,15 @@ namespace WpfApp1
                 TxtStartX.Text = antX.ToString();
                 TxtStartY.Text = antY.ToString();
             }
+            //автоматически подгоняем размер клетки под размеры правой панели
+            double panelWidth = ((FrameworkElement)FieldCanvas.Parent).ActualWidth - 30;
+            double panelHeight = ((FrameworkElement)FieldCanvas.Parent).ActualHeight - 30;
+
+            if (panelWidth < 100) panelWidth = 600; //на случай если панель еще не прорисовалась
+            if (panelHeight < 100) panelHeight = 600;
+
+            //вычисляем размер клетки под минимум
+            cellSize = Math.Max(5, Math.Min(panelWidth / width, panelHeight / height));
 
             direction = rnd.Next(4);
             DrawField();
@@ -143,30 +153,30 @@ namespace WpfApp1
 
             if (field == null) return;
 
-            FieldCanvas.Width = width * CellSize;
-            FieldCanvas.Height = height * CellSize;
+            FieldCanvas.Width = width * cellSize;
+            FieldCanvas.Height = height * cellSize;
 
-            // Клетки
+            //клетки
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
                     var rect = new Rectangle
                     {
-                        Width = CellSize - 1,
-                        Height = CellSize - 1,
+                        Width = cellSize - 1,
+                        Height = cellSize - 1,
                         Fill = field[x, y] ? Brushes.Black : Brushes.White,
                         Stroke = Brushes.LightGray,
                         StrokeThickness = 0.5
                     };
-                    Canvas.SetLeft(rect, x * CellSize);
-                    Canvas.SetTop(rect, y * CellSize);
+                    Canvas.SetLeft(rect, x * cellSize);
+                    Canvas.SetTop(rect, y * cellSize);
                     FieldCanvas.Children.Add(rect);
                     cells.Add(rect);
                 }
             }
 
-            DrawAnt(antX * CellSize, antY * CellSize);
+            DrawAnt(antX * cellSize, antY * cellSize);
         }
 
         //рисует красную стрелку
@@ -175,9 +185,9 @@ namespace WpfApp1
             if (antArrow != null)
                 FieldCanvas.Children.Remove(antArrow);
 
-            double cx = left + CellSize / 2;
-            double cy = top + CellSize / 2;
-            double s = CellSize * 0.35;
+            double cx = left + cellSize / 2;
+            double cy = top + cellSize / 2;
+            double s = cellSize * 0.35;
 
             Point[] pts = direction switch
             {
@@ -264,7 +274,7 @@ namespace WpfApp1
 
             //поворот
             direction = (direction + turn) % 4;
-            DrawAnt(antX * CellSize, antY * CellSize);
+            DrawAnt(antX * cellSize, antY * cellSize);
 
             if (!needMove) return;
 
@@ -286,7 +296,7 @@ namespace WpfApp1
             {
                 antX = nx;
                 antY = ny;
-                DrawAnt(antX * CellSize, antY * CellSize);
+                DrawAnt(antX * cellSize, antY * cellSize);
             }
             else
             {
@@ -298,10 +308,10 @@ namespace WpfApp1
         private void StartAnimation(int fromX, int fromY, int toX, int toY)
         {
             isAnimating = true;
-            animX = fromX * CellSize;
-            animY = fromY * CellSize;
-            targetX = toX * CellSize;
-            targetY = toY * CellSize;
+            animX = fromX * cellSize;
+            animY = fromY * cellSize;
+            targetX = toX * cellSize;
+            targetY = toY * cellSize;
             animProgress = 0;
 
             antX = toX;
@@ -319,7 +329,7 @@ namespace WpfApp1
             {
                 animTimer?.Stop();
                 isAnimating = false;
-                DrawAnt(antX * CellSize, antY * CellSize);
+                DrawAnt(antX * cellSize, antY * cellSize);
                 return;
             }
 
